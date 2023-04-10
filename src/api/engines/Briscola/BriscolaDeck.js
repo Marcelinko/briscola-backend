@@ -1,4 +1,4 @@
-const { Card, Groups, Values, Points } = require('./Card');
+const { Card, Suits, Values, Points, Power } = require('./BriscolaCard');
 
 class Deck {
     constructor() {
@@ -7,10 +7,10 @@ class Deck {
     }
 
     create = () => {
-        for (let group in Groups) {
+        for (let suit in Suits) {
             for (let value in Values) {
                 const points = Points[value] || Points.default;
-                this.cards.push(new Card(Groups[group], Values[value], points));
+                this.cards.push(new Card(Suits[suit], Values[value], points, Power[value]));
             }
         }
     }
@@ -20,6 +20,10 @@ class Deck {
             const j = Math.floor(Math.random() * (i + 1));
             [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
         }
+    }
+
+    deal = (amount) => {
+        return this.cards.splice(0, amount);
     }
 
 }

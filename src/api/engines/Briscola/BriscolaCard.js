@@ -1,14 +1,13 @@
 class Card {
-    constructor(group, value, points) {
-        this.group = group;
+    constructor(suit, value, points, power) {
+        this.suit = suit;
         this.value = value;
         this.points = points;
+        this.power = power;
     }
 }
 
-
-
-const Groups = {
+const Suits = {
     SPADA: 'Spada',
     KOPA: 'Kopa',
     BASTON: 'Baston',
@@ -37,9 +36,23 @@ const Points = {
     default: 0
 };
 
+const Power = {
+    AS: 10,
+    TROJKA: 9,
+    KRALJ: 8,
+    KAVAL: 7,
+    FANT: 6,
+    SEDEMKA: 5,
+    SESTKA: 4,
+    PETKA: 3,
+    STIRKA: 2,
+    DVOJKA: 1
+};
+
 module.exports = {
     Card,
-    Groups,
+    Suits,
     Values,
-    Points
+    Points,
+    Power,
 };
