@@ -1,13 +1,18 @@
-const engines = require("../../engines/engines");
+const { BriscolaEngine } = require("../../engines/Briscola/BriscolaEngine");
+
 class Room {
-  constructor(id, owner, game, engine) {
+  constructor(id, owner) {
     this.id = id;
     this.owner = owner;
     this.users = [];
-    this.game = game;
-    this.engine = engine;
     this.kickedUsers = [];
+    this.game = new BriscolaEngine();
   }
+
+  setOwner(socketId) {
+    this.owner = socketId;
+  }
+
   hasUserUUID(uuid) {
     return this.users.some((user) => user.uuid === uuid);
   }
@@ -22,25 +27,23 @@ class Room {
     return this.users.find((user) => user.id === socketId);
   }
   kickUser(socketId) {
-    this.kickedUsers.push(socketId);
+    this.kickedUsers.push(this.users.find((user) => user.id === socketId));
     this.removeUser(socketId);
   }
-  isUserKicked(socketId) {
-    return this.kickedUsers.includes(socketId);
+  isUserKicked(uuid) {
+    return this.kickedUsers.some((user) => user.uuid === uuid);
   }
   removeUser(socketId) {
     this.users = this.users.filter((user) => user.id !== socketId);
   }
-  setGame(game) {
-    this.game = game;
-    this.engine = engines[game.id];
+  startGame() {
+    this.game.newGame(this.users);
   }
   toJSON() {
     return {
       id: this.id,
       owner: this.owner,
-      users: this.users,
-      game: this.game,
+      users: this.users.map((user) => user.toJSON()),
     };
   }
 }

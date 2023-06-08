@@ -4,6 +4,12 @@ class User {
     this.uuid = uuid;
     this.nickname = nickname;
   }
+  toJSON() {
+    return {
+      id: this.id,
+      nickname: this.nickname,
+    };
+  }
 }
 
 module.exports = User;

@@ -1,5 +1,3 @@
-const games = require("../../config/games");
-const engines = require("../engines/Engines");
 const Room = require("../models/Room/Room");
 
 const rooms = {};
@@ -13,21 +11,13 @@ const generateRoomId = (length = 8) => {
   return code;
 };
 
-const getGameById = (gameId) => {
-  const id = parseInt(gameId);
-  const game = games.find((game) => game.id === id);
-  return game ? game : games.find((game) => game.id === 1);
-};
-
 const isNicknameValid = (nickname) => {
   return nickname.length >= 2 && nickname.length <= 15;
 };
 
-const createNewRoom = (gameId, socketId) => {
+const createNewRoom = (socketId) => {
   const roomId = generateRoomId();
-  const game = getGameById(gameId);
-  const engine = engines[gameId];
-  const room = new Room(roomId, socketId, game, engine);
+  const room = new Room(roomId, socketId);
   rooms[roomId] = room;
   return room;
 };
@@ -38,11 +28,69 @@ const getRoomById = (roomId) => {
 
 const deleteRoom = (roomId) => {
   delete rooms[roomId];
-  console.log(`Room ${roomId} deleted`);
 };
 
 const getRooms = () => {
   return rooms;
+};
+
+//If you are trying to join a room that you are not in
+const roomExists = (room) => {
+  if (!room) return false;
+  return true;
+};
+
+//Check if you are the owner of the room
+const isUserOwner = (room, socketId) => {
+  if (room.owner !== socketId) return false;
+  return true;
+};
+
+//Check if there are enough players to start the game
+const isEnoughPlayers = (room) => {
+  if (room.users.length < 2) return false;
+  return true;
+};
+
+//Check if you are already in the room
+const isUserInRoom = (room, socketId, uuid) => {
+  if (room.hasUserSocket(socketId) || room.hasUserUUID(uuid)) return true;
+  return false;
+};
+
+const isUserKicked = (room, uuid) => {
+  if (room.isUserKicked(uuid)) return true;
+  return false;
+};
+
+const isRoomFull = (room) => {
+  if (room.users.length === 4) return true;
+  return false;
+};
+
+const isGameInProgress = (room) => {
+  if (room.game.status === "playing") return true;
+  return false;
+};
+
+const changeOwner = (room, socketId) => {
+  if (room.users.length === 0 || room.owner !== socketId) return;
+  const newOwner = room.users[0].id;
+  room.setOwner(newOwner);
+  return newOwner;
+};
+
+const leaveRoom = (room, socketId) => {
+  const { game } = room;
+  game.reset();
+  room.removeUser(socketId);
+};
+
+const kickUser = (room, socketId) => {
+  const { game } = room;
+  game.reset();
+  room.kickUser(socketId);
+  console.log(room.game);
 };
 
 module.exports = {
@@ -51,4 +99,14 @@ module.exports = {
   deleteRoom,
   getRooms,
   isNicknameValid,
+  roomExists,
+  isUserOwner,
+  isEnoughPlayers,
+  isUserInRoom,
+  isUserKicked,
+  isRoomFull,
+  isGameInProgress,
+  changeOwner,
+  leaveRoom,
+  kickUser,
 };

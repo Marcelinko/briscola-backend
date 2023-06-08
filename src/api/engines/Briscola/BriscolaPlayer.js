@@ -1,15 +1,17 @@
-class Player {
-    constructor(id, name) {
-        this.id = id;
-        this.name = name;
-        this.hand = [];
-        this.cardsWon = [];
-        this.wins = 0;
-    }
-    fromJSON(json) {
-        const { id, name, hand, cardsWon } = JSON.parse(json);
-        return new Player(id, name, hand, cardsWon);
-    }
+class BriscolaPlayer {
+  constructor(id, nickname) {
+    this.id = id;
+    this.nickname = nickname;
+    this.hand = [];
+    this.cardsWon = [];
+    this.wins = 0;
+  }
+  toJSON() {
+    return {
+      id: this.id,
+      nickname: this.nickname,
+    };
+  }
 }
 
-module.exports = Player;
+module.exports = BriscolaPlayer;
