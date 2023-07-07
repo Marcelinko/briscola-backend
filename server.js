@@ -25,13 +25,20 @@ io.listen(server);
 // app.use("/api", routes);
 
 const onConnection = (socket) => {
-  console.log(`User ${socket.id} connected`);
   roomHandler(io, socket);
   briscolaHandler(io, socket);
 };
 
 io.on("connection", onConnection);
 const PORT = process.env.PORT || 3000;
+
+const madge = require("madge");
+
+madge("server.js")
+  .then((res) => res.image("/src/image.svg"))
+  .then((writtenImagePath) => {
+    console.log("Image written to " + writtenImagePath);
+  });
 
 server.listen(PORT, () =>
   console.log(`Server running on port: http://localhost:${PORT}`)

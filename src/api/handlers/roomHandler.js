@@ -1,8 +1,6 @@
 const Messsage = require("../models/Room/Message");
 const SystemMessage = require("../models/Room/SystemMessage");
-const User = require("../models/Room/User");
 const roomUtils = require("../utils/roomUtils");
-const SocketErrors = require("../models/SocketErrors");
 
 const isCallbackFunction = (cb) => {
   return typeof cb === "function";
@@ -13,125 +11,121 @@ module.exports = (io, socket) => {
     if (!isCallbackFunction(cb)) return;
     const { uuid = "modified", nickname } = data;
 
-    if (!roomUtils.isNicknameValid(nickname)) return;
-    const room = roomUtils.createNewRoom(socket.id, uuid, nickname);
-    room.addUser(new User(socket.id, uuid, nickname));
-    socket.join(room.id);
-    cb(null, room.toJSON());
+    try {
+      const { roomId, room } = roomUtils.createRoom(socket.id, uuid, nickname);
+      socket.join(roomId);
+      cb(null, room.toJSON());
+    } catch (err) {
+      cb({ error: err.message });
+    }
   };
 
   const joinRoom = (data, cb) => {
     if (!isCallbackFunction(cb)) return;
     const { roomId, uuid = "modified", nickname } = data;
-    const room = roomUtils.getRoomById(roomId);
 
-    if (!roomUtils.roomExists(room))
-      return cb({ error: SocketErrors.ROOM_NOT_FOUND });
-    if (!roomUtils.isNicknameValid(nickname)) return;
-    if (roomUtils.isUserInRoom(room, socket.id, uuid))
-      return cb({ error: SocketErrors.ALREADY_IN_ROOM });
-    if (roomUtils.isUserKicked(room, uuid))
-      return cb({ error: SocketErrors.USER_KICKED });
-    if (roomUtils.isRoomFull(room))
-      return cb({ error: SocketErrors.ROOM_FULL });
-    if (roomUtils.isGameInProgress(room))
-      return cb({ error: SocketErrors.GAME_IN_PROGRESS });
-    room.addUser(new User(socket.id, uuid, nickname));
-    socket.join(roomId);
-    io.to(roomId).emit("room:update", room);
-    socket.broadcast
-      .to(roomId)
-      .emit(
-        "room:newMessage",
-        new SystemMessage(`${nickname} has joined the room`, "join")
-      );
-    cb(null, room.toJSON());
+    try {
+      const room = roomUtils.joinRoom(roomId, socket.id, uuid, nickname);
+      socket.join(roomId);
+      io.to(roomId).emit("room:update", room);
+      socket.broadcast
+        .to(roomId)
+        .emit(
+          "room:newMessage",
+          new SystemMessage(`${nickname} has joined the room`, "join")
+        );
+      cb(null, room.toJSON());
+    } catch (err) {
+      cb({ error: err.message });
+    }
   };
 
   const sendMessage = (data, cb) => {
     if (!isCallbackFunction(cb)) return;
     const { roomId, message } = data;
-    const room = roomUtils.getRoomById(roomId);
-
-    if (!roomUtils.roomExists(room))
-      return cb({ error: SocketErrors.ROOM_NO_LONGER_EXISTS });
-    if (!roomUtils.isUserInRoom(room, socket.id))
-      return cb({ error: SocketErrors.NO_LONGER_IN_ROOM });
     if (!message) return;
-    io.to(roomId).emit(
-      "room:newMessage",
-      new Messsage(room.getUser(socket.id), message)
-    );
-    cb(null);
+    try {
+      const user = roomUtils.sendMessage(roomId, socket.id);
+      io.to(roomId).emit(
+        "room:newMessage",
+        new Messsage(user.toJSON(), message)
+      );
+      cb(null);
+    } catch (err) {
+      cb({ error: err.message });
+    }
   };
 
   const kickUser = (data, cb) => {
     if (!isCallbackFunction(cb)) return;
     const { roomId, userId } = data;
-    const room = roomUtils.getRoomById(roomId);
-
-    if (!roomUtils.roomExists(room))
-      return cb({ error: SocketErrors.ROOM_NO_LONGER_EXISTS });
-    if (!roomUtils.isUserInRoom(room, socket.id))
-      return cb({ error: SocketErrors.USER_NOT_FOUND });
-    if (!roomUtils.isUserOwner(room, socket.id) || room.owner === userId)
-      return;
-    const user = room.getUser(userId);
-    const socketToKick = io.sockets.sockets.get(userId);
-    if (socketToKick) {
-      socketToKick.leave(roomId);
+    try {
+      const { room, user } = roomUtils.kickUser(roomId, socket.id, userId);
+      const socketToKick = io.sockets.sockets.get(userId);
+      if (socketToKick) {
+        socketToKick.leave(roomId);
+      }
+      socket
+        .to(userId)
+        .emit(
+          "room:kicked",
+          new SystemMessage(`You were kicked from the room`)
+        );
+      io.to(roomId).emit(
+        "room:newMessage",
+        new SystemMessage(`${user.nickname} was kicked from the room`, "kick")
+      );
+      io.to(roomId).emit("room:update", room.toJSON());
+      io.to(roomId).emit("briscola:stopGame");
+      cb(null);
+    } catch (err) {
+      cb({ error: err.message });
     }
-    socket
-      .to(userId)
-      .emit("room:kicked", new SystemMessage(`You were kicked from the room`));
-    roomUtils.kickUser(room, userId);
-    io.to(roomId).emit(
-      "room:newMessage",
-      new SystemMessage(`${user.nickname} was kicked from the room`, "kick")
-    );
-    io.to(roomId).emit("room:update", room);
-    cb(null);
+  };
+
+  const shuffleUsers = (data, cb) => {
+    if (!isCallbackFunction(cb)) return;
+    const { roomId } = data;
+    try {
+      const room = roomUtils.roomCheckOwner(roomId, socket.id);
+      if (room.users.length < 4) {
+        throw new Error("Not enough players to shuffle teams");
+      }
+      if (room.game.playing) {
+        throw new Error("Can't shuffle teams while playing");
+      }
+      room.shuffleUsers();
+      io.to(roomId).emit("room:update", room.toJSON());
+      cb(null);
+    } catch (err) {
+      cb({ error: err.message });
+    }
   };
 
   const leaveRoom = (data) => {
     const { roomId } = data;
-    const room = roomUtils.getRoomById(roomId);
-    console.log(`User ${socket.id} left room ${roomId}`);
-    if (!roomUtils.roomExists(room)) return;
-    if (!roomUtils.isUserInRoom(room, socket.id)) return;
-    io.to(roomId).emit(
-      "room:newMessage",
-      new SystemMessage(
-        `${room.getUser(socket.id).nickname} has left the room`,
-        "leave"
-      )
-    );
-    socket.leave(roomId);
-    roomUtils.leaveRoom(room, socket.id);
-    const newOwner = roomUtils.changeOwner(room, socket.id);
-    io.to(newOwner).emit(
-      "room:newOwner",
-      new SystemMessage("You are the new owner of the room")
-    );
-    if (room.game.status === "playing") {
+    try {
+      const { user, newOwner, room } = roomUtils.leaveRoom(roomId, socket.id);
       io.to(roomId).emit(
         "room:newMessage",
-        new SystemMessage(`Game ended because someone left the room`, "leave")
+        new SystemMessage(`${user.nickname} has left the room`, "leave")
       );
+      socket.leave(roomId);
+      io.to(newOwner).emit(
+        "room:newOwner",
+        new SystemMessage("You are the new owner of the room")
+      );
+      io.to(roomId).emit("room:update", room.toJSON());
+      io.to(roomId).emit("briscola:stopGame");
+    } catch (err) {
+      console.log(err);
     }
-    room.users.length === 0
-      ? roomUtils.deleteRoom(roomId)
-      : io.to(roomId).emit("room:update", room);
   };
 
   const onDisconnect = () => {
-    console.log(`User ${socket.id} disconnected`);
-    const rooms = roomUtils.getRooms();
+    const rooms = roomUtils.leaveAllRooms(socket.id);
     for (const roomId in rooms) {
-      const room = rooms[roomId];
-      if (roomUtils.isUserInRoom(room, socket.id)) {
-        leaveRoom({ roomId: room.id });
-      }
+      leaveRoom({ roomId });
     }
   };
 
@@ -139,6 +133,7 @@ module.exports = (io, socket) => {
   socket.on("room:join", joinRoom);
   socket.on("room:sendMessage", sendMessage);
   socket.on("room:kickUser", kickUser);
+  socket.on("room:shuffleUsers", shuffleUsers);
   socket.on("room:leave", leaveRoom);
   socket.on("disconnect", onDisconnect);
 };

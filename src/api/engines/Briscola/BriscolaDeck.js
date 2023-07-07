@@ -29,6 +29,11 @@ class Deck {
   removeLowestCard = () => {
     this.cards.pop();
   };
+
+  //JUST FOR TESTING
+  remove30Cards = () => {
+    this.cards.splice(0, 30);
+  };
 }
 
 module.exports = Deck;

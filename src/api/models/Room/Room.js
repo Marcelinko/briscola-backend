@@ -9,36 +9,52 @@ class Room {
     this.game = new BriscolaEngine();
   }
 
+  getOwner() {
+    return this.owner;
+  }
+
   setOwner(socketId) {
     this.owner = socketId;
   }
 
-  hasUserUUID(uuid) {
-    return this.users.some((user) => user.uuid === uuid);
+  getUserByUUID(uuid) {
+    return this.users.find((user) => user.uuid === uuid);
   }
 
-  hasUserSocket(socketId) {
-    return this.users.some((user) => user.id === socketId);
+  getUserBySocket(socketId) {
+    return this.users.find((user) => user.id === socketId);
   }
+
   addUser(user) {
     this.users.push(user);
   }
-  getUser(socketId) {
-    return this.users.find((user) => user.id === socketId);
+
+  removeUser(socketId) {
+    this.users = this.users.filter((user) => user.id !== socketId);
   }
+
+  isUserKicked(uuid) {
+    return this.kickedUsers.some((user) => user.uuid === uuid);
+  }
+
   kickUser(socketId) {
     this.kickedUsers.push(this.users.find((user) => user.id === socketId));
     this.removeUser(socketId);
   }
-  isUserKicked(uuid) {
-    return this.kickedUsers.some((user) => user.uuid === uuid);
-  }
-  removeUser(socketId) {
-    this.users = this.users.filter((user) => user.id !== socketId);
-  }
+
   startGame() {
-    this.game.newGame(this.users);
+    this.game.startGame(this.users);
   }
+
+  shuffleUsers() {
+    for (let i = this.users.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * i);
+      const temp = this.users[i];
+      this.users[i] = this.users[j];
+      this.users[j] = temp;
+    }
+  }
+
   toJSON() {
     return {
       id: this.id,

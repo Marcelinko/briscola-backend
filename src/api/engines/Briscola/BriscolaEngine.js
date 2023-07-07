@@ -1,134 +1,123 @@
 const BriscolaDeck = require("./BriscolaDeck");
 const BriscolaPlayer = require("./BriscolaPlayer");
 const { Values, Points } = require("./BriscolaCard");
+const GameError = require("../../errors/GameError");
+
 class BriscolaEngine {
   constructor() {
     this.players = [];
     this.deck = null;
     this.trumpCard = null;
-
-    this.currentPlayerIndex = 0;
+    this.firstPlayerIndex = 0;
+    this.currentPlayerIndex = -1;
     this.roundCards = [];
-    this.playedCards = 0;
-    this.status = Status.WAITING;
+    this.teams = [];
+    this.gameActive = false;
+    this.turnTime = 10; //Maybe client should decide this
+    this.timer = null;
   }
 
-  playCard(playerId, card) {
+  startGame(roomId, users, io) {
+    if (users.length < 2) throw new GameError(SocketErrors.NOT_ENOUGH_PLAYERS);
+    if (this.gameActive) throw new GameError(SocketErrors.GAME_IN_PROGRESS);
+    this.initializeGame(users, true);
+    this.dealStartingCards(roomId, io);
+  }
+
+  stopGame() {
+    this.clearGame();
+    clearInterval(this.timer);
+  }
+
+  playCard(roomId, card, playerId, io) {
+    if (!this.gameActive)
+      throw new GameError(SocketErrors.GAME_NOT_IN_PROGRESS);
+    if (!this.isYourTurn(playerId))
+      throw new GameError(SocketErrors.NOT_YOUR_TURN);
+
     const player = this.players.find((player) => player.id === playerId);
+    if (!player) {
+      return;
+    }
+    this.playCardFromPlayer(player, card);
+    clearInterval(this.timer);
+    io.to(playerId).emit("briscola:hand", this.getPlayerHand(playerId));
+    if (this.isRoundComplete()) {
+      this.handleRoundComplete(roomId, io);
+      if (this.isGameComplete()) {
+        this.handleGameComplete(roomId, io);
+        return;
+      }
+    } else {
+      this.nextPlayer();
+      io.to(this.getCurrentPlayer().id).emit("briscola:turn");
+      this.startTurnTimer(roomId, io);
+    }
+  }
+
+  handleRoundComplete(roomId, io) {
+    const roundWinner = this.finishRound();
+    setTimeout(() => {
+      io.to(roomId).emit("briscola:roundWinner", roundWinner);
+      setTimeout(() => {
+        this.players.forEach((player) => {
+          io.to(player.id).emit("briscola:hand", player.hand);
+        });
+        if (this.isLastDeal() && this.teams.length !== 0) {
+          this.players.forEach((player) => {
+            io.to(roomId).emit("briscola:teamCards", this.getTeamCards(player));
+          });
+        }
+        io.to(roomId).emit(
+          "briscola:dealRound",
+          this.gameState(!this.isDeckEmpty())
+        );
+      }, 1000);
+    }, 1000);
+    this.startTurnTimer(roomId, io, 2000);
+  }
+
+  handleGameComplete(roomId, io) {
+    console.log("Game Complete");
+    setTimeout(() => {
+      //const gameResult = this.getGameResult();
+      io.to(roomId).emit("briscola:gameWinner", "Someone won idk");
+      this.newGame(roomId, io);
+      io.to(roomId).emit("briscola:dealGame", this.gameState());
+      const blockTime = this.players.length * 1000 + 1000;
+      setTimeout(() => {
+        this.players.forEach((player) => {
+          io.to(player.id).emit("briscola:hand", player.hand);
+        });
+      }, blockTime);
+    }, 2000);
+    this.startTurnTimer(roomId, io, blockTime + 2000);
+  }
+
+  playCardFromPlayer(player, card) {
+    const { id, nickname } = player;
+    const playedCard = {
+      player: { id, nickname },
+      card,
+    };
+
     const cardIndex = player.hand.findIndex((handCard) => {
       return handCard.suit === card.suit && handCard.value === card.value;
     });
-    if (cardIndex === -1) return;
-    player.hand.splice(cardIndex, 1);
-    const cardPlayed = {
-      player: {
-        id: player.id,
-        nickname: player.nickname,
-      },
-      card,
-    };
-    this.playedCards++;
-    this.roundCards.push(cardPlayed);
-    if (this.isLastPlayerOfRound()) {
-      this.currentPlayerIndex;
-      setTimeout(() => {
-        this.endRound();
-      }, 2000);
-    } else {
-      this.nextPlayer();
+    if (cardIndex === -1) {
+      return;
     }
-  }
-
-  determineGameWinner() {
-    const points = {};
-    this.players.forEach((player) => {
-      const cards = player.cardsWon;
-      cards.forEach((card) => {
-        const cardValue =
-          Points[card.card.value.toUpperCase()] || Points.default;
-        points[player.id] = (points[player.id] || 0) + cardValue;
-      });
+    player.hand = player.hand.filter((handCard) => {
+      return !(handCard.suit === card.suit && handCard.value === card.value);
     });
-
-    let maxPoints = -Infinity;
-    let winners = [];
-    for (const playerId in points) {
-      if (points[playerId] > maxPoints) {
-        maxPoints = points[playerId];
-        winners = [playerId];
-      } else if (points[playerId] === maxPoints) {
-        winners.push(playerId);
-      }
-    }
-    if (winners.length === 1) {
-      const winner = this.players.find((player) => player.id === winners[0]);
-      return `The winner is ${winner.nickname} with ${maxPoints} points`;
-    } else {
-      const drawPlayers = winners.map((winner) => {
-        return this.players.find((player) => player.id === winner);
-      });
-      const drawPlayerNames = drawPlayers
-        .map((player) => player.nickname)
-        .join(", ");
-      return `The game ended in a draw between ${drawPlayerNames} with ${maxPoints} points`;
-    }
+    this.roundCards.push(playedCard);
   }
 
-  newGame(users) {
-    this.reset();
-    users.forEach((user) => {
-      this.players.push(new BriscolaPlayer(user.id, user.nickname));
-    });
-    this.deck = new BriscolaDeck();
-    if (this.players.length === 3) {
-      this.deck.removeLowestCard();
-    }
-    this.deck.shuffle();
-    this.trumpCard = this.deck.deal(1)[0];
-    this.dealCards();
-    this.status = Status.PLAYING;
-  }
-
-  reset() {
-    this.players = [];
-    this.deck = null;
-    this.trumpCard = null;
-    this.currentPlayerIndex = 0;
-    this.playedCards = 0;
-    this.roundCards = [];
-    this.status = Status.WAITING;
-  }
-
-  isYourTurn(playerId) {
-    if (this.players.length === 0) return false;
-    return this.players[this.currentPlayerIndex].id === playerId;
-  }
-
-  getTurn() {
-    return this.players[this.currentPlayerIndex].id;
-  }
-
-  isLastPlayerOfRound() {
-    if (this.roundCards.length === this.players.length) {
-      return true;
-    }
-  }
-
-  isLastDeal() {
-    return this.deck.cards.length === this.players.length - 1;
-  }
-
-  dealCards() {
-    this.players.forEach((player) => {
-      player.hand = this.deck.deal(3);
-    });
-  }
-
-  isGameOver() {
-    if (this.players.length === 3) {
-      return this.playedCards === 39;
-    }
-    return this.playedCards === 40;
+  playRandomCard(roomId, io) {
+    const currentPlayer = this.players[this.currentPlayerIndex];
+    const randomCard =
+      currentPlayer.hand[Math.floor(Math.random() * currentPlayer.hand.length)];
+    this.playCard(roomId, randomCard, currentPlayer.id, io);
   }
 
   nextPlayer() {
@@ -136,31 +125,159 @@ class BriscolaEngine {
       (this.currentPlayerIndex + 1) % this.players.length;
   }
 
-  getPlayerHand(playerId) {
-    return this.players.find((player) => player.id === playerId).hand;
-  }
-
-  determineRoundWinner() {
-    let winner = this.roundCards[0];
-    for (let i = 1; i < this.roundCards.length; i++) {
-      const card = this.roundCards[i].card;
-      const isFirstPlayedSuit = card.suit === winner.card.suit;
-      const isTrumpSuit = card.suit === this.trumpCard.suit;
-      if (isTrumpSuit) {
-        if (winner.card.suit === this.trumpCard.suit) {
-          if (this.isHigherCard(card, winner.card)) {
-            winner = this.roundCards[i];
-          }
-        } else {
-          winner = this.roundCards[i];
-        }
-      } else if (isFirstPlayedSuit) {
-        if (this.isHigherCard(card, winner.card)) {
-          winner = this.roundCards[i];
-        }
+  dealRound() {
+    let currentIndex = this.currentPlayerIndex;
+    for (let i = 0; i < this.players.length; i++) {
+      const playerIndex = (currentIndex + i) % this.players.length;
+      const player = this.players[playerIndex];
+      const dealtCard = this.deck.deal(1)[0];
+      if (dealtCard) {
+        player.hand.push(dealtCard);
       }
     }
-    return winner;
+  }
+
+  calculateWinner() {}
+
+  //Function that is called when a round is finished which calculates the winner of the round
+  finishRound() {
+    const roundWinner = this.getRoundWinner();
+    this.currentPlayerIndex = this.players.indexOf(roundWinner);
+    roundWinner.cardsWon.push(...this.roundCards);
+    //isLastDeal
+    if (this.isLastDeal()) {
+      const lastPlayer = this.players.find(
+        (_, index) =>
+          index ===
+          (this.currentPlayerIndex + this.players.length - 1) %
+            this.players.length
+      );
+      lastPlayer.hand.push(this.trumpCard);
+    }
+    this.dealRound();
+    this.roundCards = [];
+
+    return roundWinner;
+  }
+
+  getRoundWinner() {
+    let highestCard = this.roundCards[0];
+    this.roundCards.forEach((playedCard) => {
+      const isFirstPlayedSuit = playedCard.card.suit === highestCard.card.suit;
+      const isTrumpSuit = playedCard.card.suit === this.trumpCard.suit;
+      if (isTrumpSuit) {
+        if (highestCard.card.suit === this.trumpCard.suit) {
+          if (this.isHigherCard(playedCard.card, highestCard.card)) {
+            highestCard = playedCard;
+          }
+        } else {
+          highestCard = playedCard;
+        }
+      } else if (isFirstPlayedSuit) {
+        if (this.isHigherCard(playedCard.card, highestCard.card)) {
+          highestCard = playedCard;
+        }
+      }
+    });
+    return this.players.find((player) => player.id === highestCard.player.id);
+  }
+
+  getTeamCards(player) {
+    const playerIndex = this.players.indexOf(player);
+    const teammateIndex = (playerIndex + 2) % this.players.length;
+    const teammate = this.players[teammateIndex];
+    return [...teammate.hand];
+  }
+
+  getGameResult() {
+    const points = {};
+    this.players.forEach((player) => {
+      player.cardsWon.forEach((card) => {
+        const cardPoints =
+          Points[card.card.value.toUpperCase()] || Points.default;
+        points[player.id] = (points[player.id] || 0) + cardPoints;
+      });
+    });
+    // for (const playerId in points) {
+    //   if (points[playerId] > highestPoints) {
+    //     highestPoints = points[playerId];
+    //     winners = [{ playerId, points: points[playerId] }];
+    //   } else if (points[playerId] === highestPoints) {
+    //     winners.push({ playerId, points: points[playerId] });
+    //   }
+    // }
+    return result;
+  }
+
+  newGame(roomId, io) {
+    this.players.forEach((player) => {
+      player.reset();
+    });
+    //initialize game...
+    this.initializeGame([], false);
+    this.dealStartingCards(roomId, io);
+  }
+
+  initializeGame(users, initial) {
+    this.deck = new BriscolaDeck();
+    this.deck.shuffle();
+    //TODO: remove this
+    this.deck.remove30Cards();
+    this.trumpCard = this.deck.deal(1)[0];
+    if (initial) {
+      this.players = users.map(
+        (user) => new BriscolaPlayer(user.id, user.nickname)
+      );
+      if (this.players.length === 3) {
+        this.deck.removeLowestCard();
+      }
+      if (this.players.length === 4) {
+        this.formTeams();
+      }
+      this.gameActive = true;
+      this.firstPlayerIndex = Math.floor(Math.random() * this.players.length);
+      this.currentPlayerIndex = this.firstPlayerIndex;
+    } else {
+      this.players.forEach((player) => {
+        player.reset();
+      });
+      this.firstPlayerIndex = (this.firstPlayerIndex + 1) % this.players.length;
+      this.currentPlayerIndex = this.firstPlayerIndex;
+    }
+  }
+
+  dealStartingCards(roomId, io) {
+    for (let i = 0; i < this.players.length; i++) {
+      const playerIndex = (this.firstPlayerIndex + i) % this.players.length;
+      const player = this.players[playerIndex];
+      const dealtCards = this.deck.deal(3);
+      player.hand.push(...dealtCards);
+    }
+    io.to(roomId).emit("briscola:dealGame", this.gameState());
+    const blockTime = this.players.length * 500 + 1000;
+    setTimeout(() => {
+      this.players.forEach((player) => {
+        io.to(player.id).emit("briscola:hand", player.hand);
+      });
+    }, blockTime);
+    this.startTurnTimer(roomId, io, blockTime);
+  }
+
+  formTeams() {
+    this.teams = [
+      [this.players[0], this.players[2]],
+      [this.players[1], this.players[3]],
+    ];
+  }
+
+  clearGame() {
+    this.players = [];
+    this.deck = null;
+    this.trumpCard = null;
+    this.currentPlayerIndex = -1;
+    this.roundCards = [];
+    this.gameActive = false;
+    this.teams = [];
   }
 
   isHigherCard(card1, card2) {
@@ -169,50 +286,62 @@ class BriscolaEngine {
     return rank1 < rank2;
   }
 
-  endRound() {
-    const winner = this.determineRoundWinner();
-    this.currentPlayerIndex = this.players.findIndex(
-      (player) => player.id === winner.player.id
-    );
-    this.players[this.currentPlayerIndex].cardsWon.push(...this.roundCards);
-    if (this.isLastDeal()) {
-      const lastPlayerIndex =
-        (this.currentPlayerIndex + this.players.length - 1) %
-        this.players.length;
-      const lastPlayer = this.players[lastPlayerIndex];
-      lastPlayer.hand.push(this.trumpCard);
-    }
-    for (let i = 0; i < this.players.length; i++) {
-      const playerIndex = (this.currentPlayerIndex + i) % this.players.length;
-      const player = this.players[playerIndex];
-      player.hand.push(...this.deck.deal(1));
-    }
-    this.roundCards = [];
+  getPlayerHand(playerId) {
+    return this.players.find((player) => player.id === playerId).hand;
+  }
+  getCurrentPlayer() {
+    return this.players[this.currentPlayerIndex];
   }
 
-  getRound() {
-    return {
+  isYourTurn(playerId) {
+    if (this.currentPlayerIndex === -1) return false;
+    return this.players[this.currentPlayerIndex].id === playerId;
+  }
+
+  isRoundComplete() {
+    return this.roundCards.length === this.players.length;
+  }
+
+  //If deck is empty we don't show the trump card
+  isDeckEmpty() {
+    return this.deck.cards.length === 0;
+  }
+
+  //If it is the last deal we show our teammates cards
+  isLastDeal() {
+    return this.deck.cards.length === this.players.length - 1;
+  }
+
+  //If all players have no cards left, the game is finished
+  isGameComplete() {
+    return this.players.every((player) => player.hand.length === 0);
+  }
+
+  startTurnTimer = (roomId, io, additionalTime) => {
+    let time = this.turnTime + (additionalTime / 1000 || 0);
+    this.timer = setInterval(() => {
+      io.to(roomId).emit("briscola:turnTimer", time);
+      time--;
+      if (time < 0) {
+        this.playRandomCard(roomId, io);
+      }
+    }, 1000);
+  };
+
+  gameState(inclueTrumpCard = true) {
+    const gameState = {
+      players: this.players.map((player) => player.toJSON()),
+      currentPlayer: this.players[this.currentPlayerIndex].toJSON(),
       roundCards: this.roundCards,
+      turn: this.players[this.currentPlayerIndex].toJSON(),
     };
-  }
-
-  toJSON() {
-    return {
-      players: this.players,
-      trumpCard: this.trumpCard,
-      turn: this.players[this.currentPlayerIndex],
-      cardsLeft: this.deck.cards.length + 1,
-    };
+    if (inclueTrumpCard) {
+      gameState.trumpCard = this.trumpCard;
+    }
+    return gameState;
   }
 }
 
-const Status = {
-  WAITING: "waiting",
-  PLAYING: "playing",
-  FINISHED: "finished",
-};
-
 module.exports = {
   BriscolaEngine,
-  Status,
 };
