@@ -1,6 +1,7 @@
 module.exports = SocketErrors = {
   //Room
   INVALID_NICKNAME: "Invalid nickname",
+  INVALID_AVATAR: "Invalid avatar",
   NICKNAME_IN_USE: "Nickname is already in use",
   ROOM_NOT_FOUND: "Room not found",
   ROOM_NO_LONGER_EXISTS: "This room no longer exists",
@@ -16,4 +17,5 @@ module.exports = SocketErrors = {
   NOT_YOUR_TURN: "Not your turn",
   GAME_IN_PROGRESS: "Game in progress",
   GAME_NOT_IN_PROGRESS: "Game not in progress",
+  BLOCK_PLAY: "Počakaj trenutek",
 };

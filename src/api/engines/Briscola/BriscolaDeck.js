@@ -31,8 +31,8 @@ class Deck {
   };
 
   //JUST FOR TESTING
-  remove30Cards = () => {
-    this.cards.splice(0, 30);
+  removeCards = (amount) => {
+    this.cards.splice(0, amount);
   };
 }
 

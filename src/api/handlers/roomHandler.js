@@ -9,10 +9,15 @@ const isCallbackFunction = (cb) => {
 module.exports = (io, socket) => {
   const createRoom = (data, cb) => {
     if (!isCallbackFunction(cb)) return;
-    const { uuid = "modified", nickname } = data;
+    const { uuid = "modified", nickname, avatar } = data;
 
     try {
-      const { roomId, room } = roomUtils.createRoom(socket.id, uuid, nickname);
+      const { roomId, room } = roomUtils.createRoom(
+        socket.id,
+        uuid,
+        nickname,
+        avatar
+      );
       socket.join(roomId);
       cb(null, room.toJSON());
     } catch (err) {
@@ -22,10 +27,16 @@ module.exports = (io, socket) => {
 
   const joinRoom = (data, cb) => {
     if (!isCallbackFunction(cb)) return;
-    const { roomId, uuid = "modified", nickname } = data;
+    const { roomId, uuid = "modified", nickname, avatar } = data;
 
     try {
-      const room = roomUtils.joinRoom(roomId, socket.id, uuid, nickname);
+      const room = roomUtils.joinRoom(
+        roomId,
+        socket.id,
+        uuid,
+        nickname,
+        avatar
+      );
       socket.join(roomId);
       io.to(roomId).emit("room:update", room);
       socket.broadcast
@@ -45,11 +56,36 @@ module.exports = (io, socket) => {
     const { roomId, message } = data;
     if (!message) return;
     try {
+      //limit message length
       const user = roomUtils.sendMessage(roomId, socket.id);
       io.to(roomId).emit(
         "room:newMessage",
         new Messsage(user.toJSON(), message)
       );
+      cb(null);
+    } catch (err) {
+      cb({ error: err.message });
+    }
+  };
+
+  const transferOwnership = (data, cb) => {
+    if (!isCallbackFunction(cb)) return;
+    const { roomId, userId } = data;
+    try {
+      const { room, newOwner } = roomUtils.transferOwnership(
+        roomId,
+        socket.id,
+        userId
+      );
+      // io.to(roomId).emit(
+      //   "room:newMessage",
+      //   new SystemMessage(`${user.nickname} is the new owner of the room`)
+      // );
+      io.to(newOwner).emit(
+        "room:newOwner",
+        new SystemMessage("You are the new owner of the room")
+      );
+      io.to(roomId).emit("room:update", room.toJSON());
       cb(null);
     } catch (err) {
       cb({ error: err.message });
@@ -132,6 +168,7 @@ module.exports = (io, socket) => {
   socket.on("room:create", createRoom);
   socket.on("room:join", joinRoom);
   socket.on("room:sendMessage", sendMessage);
+  socket.on("room:transferOwnership", transferOwnership);
   socket.on("room:kickUser", kickUser);
   socket.on("room:shuffleUsers", shuffleUsers);
   socket.on("room:leave", leaveRoom);

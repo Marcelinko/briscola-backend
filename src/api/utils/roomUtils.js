@@ -18,6 +18,7 @@ const generateRoomId = (length = 8) => {
 //Check if nickname is valid
 const isNicknameValid = (nickname) =>
   nickname.length >= 2 && nickname.length <= 15;
+const isAvatarValid = (id) => id >= 1 && id <= 8;
 //Check if nickname is in use
 const isNicknameInUse = (room, nickname) =>
   room.users.some((user) => user.nickname === nickname);
@@ -56,18 +57,21 @@ const isGameInProgress = (room) => room.game.gameActive;
 //Check if user is room owner
 const isUserRoomOwner = (room, socketId) => room.owner === socketId;
 
-const createRoom = (socketId, uuid, nickname) => {
+const createRoom = (socketId, uuid, nickname, avatar) => {
   if (!isNicknameValid(nickname)) {
     throw new RoomError(SocketErrors.INVALID_NICKNAME, "INVALID_NICKNAME");
+  }
+  if (!isAvatarValid(avatar)) {
+    throw new RoomError(SocketErrors.INVALID_AVATAR, "INVALID_AVATAR");
   }
   const roomId = generateRoomId();
   const room = new Room(roomId, socketId);
   rooms[roomId] = room;
-  room.addUser(new User(socketId, uuid, nickname));
+  room.addUser(new User(socketId, uuid, nickname, avatar));
   return { roomId, room };
 };
 
-const joinRoom = (roomId, socketId, uuid, nickname) => {
+const joinRoom = (roomId, socketId, uuid, nickname, avatar) => {
   const room = getRoomById(roomId);
 
   if (!roomExists(room)) {
@@ -75,6 +79,9 @@ const joinRoom = (roomId, socketId, uuid, nickname) => {
   }
   if (!isNicknameValid(nickname)) {
     throw new RoomError(SocketErrors.INVALID_NICKNAME, "INVALID_NICKNAME");
+  }
+  if (!isAvatarValid(avatar)) {
+    throw new RoomError(SocketErrors.INVALID_AVATAR, "INVALID_AVATAR");
   }
   if (isUserKicked(room, uuid)) {
     throw new RoomError(SocketErrors.USER_KICKED, "USER_KICKED");
@@ -92,7 +99,7 @@ const joinRoom = (roomId, socketId, uuid, nickname) => {
     throw new RoomError(SocketErrors.NICKNAME_IN_USE, "NICKNAME_IN_USE");
   }
 
-  room.addUser(new User(socketId, uuid, nickname));
+  room.addUser(new User(socketId, uuid, nickname, avatar));
 
   return room;
 };
@@ -107,6 +114,25 @@ const sendMessage = (roomId, socketId) => {
   }
   const user = room.getUserBySocket(socketId);
   return user;
+};
+
+const transferOwnership = (roomId, socketId, userId) => {
+  const room = getRoomById(roomId);
+  if (!roomExists(room)) {
+    throw new RoomError(SocketErrors.ROOM_NOT_FOUND, "ROOM_NOT_FOUND");
+  }
+  if (!isUserInRoom(room, socketId)) {
+    throw new RoomError(SocketErrors.NO_LONGER_IN_ROOM, "NO_LONGER_IN_ROOM");
+  }
+  if (!isUserRoomOwner(room, socketId)) {
+    throw new RoomError(SocketErrors.NOT_ROOM_OWNER, "NOT_ROOM_OWNER");
+  }
+  const user = room.getUserBySocket(userId);
+  if (!user) {
+    throw new RoomError(SocketErrors.USER_NOT_FOUND, "USER_NOT_FOUND");
+  }
+  room.setOwner(userId);
+  return { room, newOwner: userId };
 };
 
 const kickUser = (roomId, socketId, userId) => {
@@ -198,6 +224,7 @@ module.exports = {
   createRoom,
   joinRoom,
   sendMessage,
+  transferOwnership,
   kickUser,
   leaveRoom,
   roomCheck,

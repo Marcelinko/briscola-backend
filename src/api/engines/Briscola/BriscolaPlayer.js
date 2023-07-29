@@ -15,6 +15,7 @@ class BriscolaPlayer {
     return {
       id: this.id,
       nickname: this.nickname,
+      cardsLeft: this.hand.length,
       wins: this.wins,
     };
   }

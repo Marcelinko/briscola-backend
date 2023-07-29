@@ -13,10 +13,13 @@ class BriscolaEngine {
     this.roundCards = [];
     this.teams = [];
     this.gameActive = false;
-    this.turnTime = 10; //Maybe client should decide this
-    this.timer = null;
+    this.turnTime = 15; //Turn time in seconds(never less than blockPlay timeout)
+    this.timer = null; //Timer for turn
+    this.blockPlay = false;
+    this.blockTimeout = null; //Timeout for blockPlay
   }
-
+  //TODO: Naredi da ti random najnizjo karto vrze pr 3 igralcih in emitas event
+  //TODO: Blockplay je kul, pošlji socket error: Počakaj trenutek
   startGame(roomId, users, io) {
     if (users.length < 2) throw new GameError(SocketErrors.NOT_ENOUGH_PLAYERS);
     if (this.gameActive) throw new GameError(SocketErrors.GAME_IN_PROGRESS);
@@ -26,6 +29,7 @@ class BriscolaEngine {
 
   stopGame() {
     this.clearGame();
+    this.clearTimeouts();
     clearInterval(this.timer);
   }
 
@@ -34,6 +38,7 @@ class BriscolaEngine {
       throw new GameError(SocketErrors.GAME_NOT_IN_PROGRESS);
     if (!this.isYourTurn(playerId))
       throw new GameError(SocketErrors.NOT_YOUR_TURN);
+    if (this.blockPlay) throw new GameError(SocketErrors.BLOCK_PLAY);
 
     const player = this.players.find((player) => player.id === playerId);
     if (!player) {
@@ -43,55 +48,65 @@ class BriscolaEngine {
     clearInterval(this.timer);
     io.to(playerId).emit("briscola:hand", this.getPlayerHand(playerId));
     if (this.isRoundComplete()) {
+      io.to(roomId).emit("briscola:update", this.gameState());
       this.handleRoundComplete(roomId, io);
-      if (this.isGameComplete()) {
-        this.handleGameComplete(roomId, io);
-        return;
-      }
     } else {
       this.nextPlayer();
+      io.to(roomId).emit("briscola:update", this.gameState());
       io.to(this.getCurrentPlayer().id).emit("briscola:turn");
       this.startTurnTimer(roomId, io);
     }
   }
 
   handleRoundComplete(roomId, io) {
-    const roundWinner = this.finishRound();
-    setTimeout(() => {
-      io.to(roomId).emit("briscola:roundWinner", roundWinner);
-      setTimeout(() => {
-        this.players.forEach((player) => {
-          io.to(player.id).emit("briscola:hand", player.hand);
-        });
-        if (this.isLastDeal() && this.teams.length !== 0) {
-          this.players.forEach((player) => {
+    const roundWinner = this.getRoundWinner();
+    this.currentPlayerIndex = this.players.indexOf(roundWinner);
+    roundWinner.cardsWon.push(...this.roundCards);
+    //isLastDeal
+    if (this.isLastDeal()) {
+      const lastPlayer = this.players.find(
+        (_, index) =>
+          index ===
+          (this.currentPlayerIndex + this.players.length - 1) %
+            this.players.length
+      );
+      lastPlayer.hand.push(this.trumpCard);
+      if (this.teams.length !== 0) {
+        this.teams.forEach((team) => {
+          team.forEach((player) => {
             io.to(roomId).emit("briscola:teamCards", this.getTeamCards(player));
           });
-        }
-        io.to(roomId).emit(
-          "briscola:dealRound",
-          this.gameState(!this.isDeckEmpty())
-        );
-      }, 1000);
-    }, 1000);
-    this.startTurnTimer(roomId, io, 2000);
+        });
+      }
+    }
+    this.dealRound();
+    this.roundCards = [];
+    io.to(roomId).emit("briscola:roundWinner", roundWinner);
+    this.blockPlay = true;
+    this.blockTimeout = setTimeout(() => {
+      this.players.forEach((player) => {
+        io.to(player.id).emit("briscola:hand", player.hand);
+      });
+      //If game is complete do not deal
+      io.to(roomId).emit(
+        "briscola:dealRound",
+        this.gameState(!this.isDeckEmpty())
+      );
+      if (this.isGameComplete()) {
+        this.handleGameComplete(roomId, io);
+      } else {
+        this.startTurnTimer(roomId, io);
+      }
+      this.blockPlay = false;
+    }, 3000);
   }
 
   handleGameComplete(roomId, io) {
-    console.log("Game Complete");
-    setTimeout(() => {
-      //const gameResult = this.getGameResult();
-      io.to(roomId).emit("briscola:gameWinner", "Someone won idk");
-      this.newGame(roomId, io);
-      io.to(roomId).emit("briscola:dealGame", this.gameState());
-      const blockTime = this.players.length * 1000 + 1000;
-      setTimeout(() => {
-        this.players.forEach((player) => {
-          io.to(player.id).emit("briscola:hand", player.hand);
-        });
-      }, blockTime);
-    }, 2000);
-    this.startTurnTimer(roomId, io, blockTime + 2000);
+    const gameWinnerAnimationTime = 2000;
+
+    //const gameResult = this.getGameResult();
+    io.to(roomId).emit("briscola:gameWinner", "Someone won idk");
+    this.newGame(roomId, io);
   }
 
   playCardFromPlayer(player, card) {
@@ -135,29 +150,6 @@ class BriscolaEngine {
         player.hand.push(dealtCard);
       }
     }
-  }
-
-  calculateWinner() {}
-
-  //Function that is called when a round is finished which calculates the winner of the round
-  finishRound() {
-    const roundWinner = this.getRoundWinner();
-    this.currentPlayerIndex = this.players.indexOf(roundWinner);
-    roundWinner.cardsWon.push(...this.roundCards);
-    //isLastDeal
-    if (this.isLastDeal()) {
-      const lastPlayer = this.players.find(
-        (_, index) =>
-          index ===
-          (this.currentPlayerIndex + this.players.length - 1) %
-            this.players.length
-      );
-      lastPlayer.hand.push(this.trumpCard);
-    }
-    this.dealRound();
-    this.roundCards = [];
-
-    return roundWinner;
   }
 
   getRoundWinner() {
@@ -210,10 +202,6 @@ class BriscolaEngine {
   }
 
   newGame(roomId, io) {
-    this.players.forEach((player) => {
-      player.reset();
-    });
-    //initialize game...
     this.initializeGame([], false);
     this.dealStartingCards(roomId, io);
   }
@@ -222,7 +210,7 @@ class BriscolaEngine {
     this.deck = new BriscolaDeck();
     this.deck.shuffle();
     //TODO: remove this
-    this.deck.remove30Cards();
+    //this.deck.removeCards(16);
     this.trumpCard = this.deck.deal(1)[0];
     if (initial) {
       this.players = users.map(
@@ -254,13 +242,11 @@ class BriscolaEngine {
       player.hand.push(...dealtCards);
     }
     io.to(roomId).emit("briscola:dealGame", this.gameState());
-    const blockTime = this.players.length * 500 + 1000;
-    setTimeout(() => {
-      this.players.forEach((player) => {
-        io.to(player.id).emit("briscola:hand", player.hand);
-      });
-    }, blockTime);
-    this.startTurnTimer(roomId, io, blockTime);
+    const dealAnimationTime = this.players.length * 500 + 1000;
+    this.players.forEach((player) => {
+      io.to(player.id).emit("briscola:hand", player.hand);
+    });
+    this.startTurnTimer(roomId, io);
   }
 
   formTeams() {
@@ -278,6 +264,11 @@ class BriscolaEngine {
     this.roundCards = [];
     this.gameActive = false;
     this.teams = [];
+    this.blockPlay = false;
+  }
+
+  clearTimeouts() {
+    clearTimeout(this.blockTimeout);
   }
 
   isHigherCard(card1, card2) {
@@ -289,6 +280,7 @@ class BriscolaEngine {
   getPlayerHand(playerId) {
     return this.players.find((player) => player.id === playerId).hand;
   }
+
   getCurrentPlayer() {
     return this.players[this.currentPlayerIndex];
   }
@@ -317,8 +309,8 @@ class BriscolaEngine {
     return this.players.every((player) => player.hand.length === 0);
   }
 
-  startTurnTimer = (roomId, io, additionalTime) => {
-    let time = this.turnTime + (additionalTime / 1000 || 0);
+  startTurnTimer = (roomId, io) => {
+    let time = this.turnTime;
     this.timer = setInterval(() => {
       io.to(roomId).emit("briscola:turnTimer", time);
       time--;
@@ -333,7 +325,6 @@ class BriscolaEngine {
       players: this.players.map((player) => player.toJSON()),
       currentPlayer: this.players[this.currentPlayerIndex].toJSON(),
       roundCards: this.roundCards,
-      turn: this.players[this.currentPlayerIndex].toJSON(),
     };
     if (inclueTrumpCard) {
       gameState.trumpCard = this.trumpCard;

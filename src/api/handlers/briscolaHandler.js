@@ -26,6 +26,7 @@ module.exports = (io, socket) => {
       const { game } = room;
       game.stopGame();
       io.to(roomId).emit("briscola:stopGame");
+      cb(null);
     } catch (err) {
       cb({ error: err.message });
     }
