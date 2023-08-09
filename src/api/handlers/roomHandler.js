@@ -127,7 +127,7 @@ module.exports = (io, socket) => {
       if (room.users.length < 4) {
         throw new Error("Not enough players to shuffle teams");
       }
-      if (room.game.playing) {
+      if (room.game.gameActive) {
         throw new Error("Can't shuffle teams while playing");
       }
       room.shuffleUsers();

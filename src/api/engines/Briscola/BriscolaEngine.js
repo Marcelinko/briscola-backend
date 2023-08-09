@@ -325,6 +325,7 @@ class BriscolaEngine {
       players: this.players.map((player) => player.toJSON()),
       currentPlayer: this.players[this.currentPlayerIndex].toJSON(),
       roundCards: this.roundCards,
+      gameActive: this.gameActive,
     };
     if (inclueTrumpCard) {
       gameState.trumpCard = this.trumpCard;

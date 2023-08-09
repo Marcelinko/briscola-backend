@@ -17,7 +17,7 @@ const generateRoomId = (length = 8) => {
 
 //Check if nickname is valid
 const isNicknameValid = (nickname) =>
-  nickname.length >= 2 && nickname.length <= 15;
+  nickname.length >= 2 && nickname.length <= 12;
 const isAvatarValid = (id) => id >= 1 && id <= 8;
 //Check if nickname is in use
 const isNicknameInUse = (room, nickname) =>
