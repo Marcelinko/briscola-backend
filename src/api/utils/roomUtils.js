@@ -5,13 +5,22 @@ const SocketErrors = require("../errors/SocketErrors");
 
 const rooms = {};
 
-//TODO: Collision check
 const generateRoomId = (length = 8) => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let roomId = "";
   for (let i = 0; i < length; i++) {
     roomId += characters.charAt(Math.floor(Math.random() * characters.length));
   }
+  return roomId;
+};
+
+const isRoomUnique = (roomId) => !rooms.hasOwnProperty(roomId);
+
+const generateUniqueRoomId = () => {
+  let roomId;
+  do {
+    roomId = generateRoomId();
+  } while (!isRoomUnique(roomId));
   return roomId;
 };
 
@@ -64,7 +73,7 @@ const createRoom = (socketId, uuid, nickname, avatar) => {
   if (!isAvatarValid(avatar)) {
     throw new RoomError(SocketErrors.INVALID_AVATAR, "INVALID_AVATAR");
   }
-  const roomId = generateRoomId();
+  const roomId = generateUniqueRoomId();
   const room = new Room(roomId, socketId);
   rooms[roomId] = room;
   room.addUser(new User(socketId, uuid, nickname, avatar));

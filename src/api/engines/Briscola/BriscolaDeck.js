@@ -29,11 +29,6 @@ class Deck {
   removeLowestCard = () => {
     this.cards.pop();
   };
-
-  //JUST FOR TESTING
-  removeCards = (amount) => {
-    this.cards.splice(0, amount);
-  };
 }
 
 module.exports = Deck;
