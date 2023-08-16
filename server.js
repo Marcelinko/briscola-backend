@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const roomHandler = require("./src/api/handlers/roomHandler");
@@ -7,7 +8,7 @@ const app = express();
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3001",
+    origin: process.env.CLIENT_URL,
   })
 );
 
@@ -18,7 +19,7 @@ app.use(
 const server = require("http").createServer(app);
 const io = require("socket.io")(server, {
   cors: {
-    origin: "http://localhost:3001",
+    origin: process.env.CLIENT_URL,
     methods: ["GET", "POST"],
   },
 });
